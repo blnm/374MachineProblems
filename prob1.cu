@@ -18,12 +18,16 @@
 
 // gets number of cores based on major/minor revision number
 // return of -1 indicates unknown device.
+// sources for number of cores per SM: 
+//	https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#compute-capabilities
+//	https://devblogs.nvidia.com/inside-pascal/
 int getNumCores(cudaDeviceProp devProp)
 {
 	int mp = devProp.multiProcessorCount;
 
 	switch (devProp.major)
 	{
+	// excluding revision 1.x as CUDA 8 does not support these cards.
 	case 2: // Fermi
 		return (devProp.minor == 1) ? (mp * 48) : (mp * 32);
 	case 3: // Kepler
