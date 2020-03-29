@@ -2,9 +2,11 @@
 #include "device_launch_parameters.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
-#define MATRIX_DIM 255
+#define MATRIX_DIM 5000
 #define MATRIX_SIZE (MATRIX_DIM * MATRIX_DIM)
+#define BLOCK_WIDTH 16
 
 void addWithCuda(float *c, const float *a, const float *b);
 
@@ -15,12 +17,17 @@ __global__ void matrixAddition(float *C, float *A, float *B)
 	int row = blockIdx.y*blockDim.y + threadIdx.y;
 	int col = blockIdx.x*blockDim.x + threadIdx.x;
 
-	if (row < MATRIX_DIM && col < MATRIX_DIM && row*MATRIX_DIM + col < MATRIX_SIZE)
+	if (row < MATRIX_DIM && col < MATRIX_DIM)
 	{
 		float c_val = 0;
 		int ind = row*MATRIX_DIM + col;
-		
+
 		C[ind] = A[ind] + B[ind];
+		//if (C[ind] == 0) printf("wtf");
+		/*if (ind == 1146177)
+		{
+			printf("%f, %f, %f\n", A[ind], B[ind], C[ind]);
+		}*/
 		//printf("%f, %f, %f\n", A[ind], B[ind], C[ind]);
 	}
 	__syncthreads();
@@ -28,21 +35,23 @@ __global__ void matrixAddition(float *C, float *A, float *B)
 
 bool verifyGPUsoln(const float *GPU_C, const float *A, const float *B)
 {
-	float C[MATRIX_SIZE] = {};
+	/*float C[MATRIX_SIZE] = {};
 
 	for (int i = 0; i < MATRIX_DIM; i++)
 	{
 		for (int j = 0; j < MATRIX_DIM; j++)
 			C[i*MATRIX_DIM + j] = A[i*MATRIX_DIM + j] + B[i*MATRIX_DIM + j];
-	}
+	}*/
 	bool passed = true;
 	for (int i = 0; i < MATRIX_SIZE; i++)
 	{
-		//printf("%f\t%f\n", GPU_C[i], C[i]);
-		if (GPU_C[i] != C[i])
+		float c = A[i] + B[i];
+		// everything before index 10000 is incorrect for some reason.
+		if (GPU_C[i] != c)//C[i])
 		{
+			printf("%d\t%f\t%f\t%f\t%f\n", i, A[i], B[i], GPU_C[i], c);
 			passed = false;
-			//break;
+			break;
 		}
 	}
 
@@ -52,7 +61,7 @@ bool verifyGPUsoln(const float *GPU_C, const float *A, const float *B)
 	{
 		printf("TEST PASSED\n");
 	}
-	else 
+	else
 		printf("TEST FAILED\n");
 
 	return passed;
@@ -61,37 +70,49 @@ bool verifyGPUsoln(const float *GPU_C, const float *A, const float *B)
 
 int main()
 {
-	float a[MATRIX_SIZE] = {};
+	/*float a[MATRIX_SIZE] = {};
 	float b[MATRIX_SIZE] = {};
-    float c[MATRIX_SIZE] = {};
-
+	float c[MATRIX_SIZE] = {};
+	*/
+	float *a = (float *)malloc(MATRIX_SIZE * sizeof(float));
+	float *b = (float *)malloc(MATRIX_SIZE * sizeof(float));
+	float *c = (float *)malloc(MATRIX_SIZE * sizeof(float));
+	
 	for (int i = 0; i < MATRIX_SIZE; i++)
-		a[i] = b[i] = (float)i;				//TODO - replace with rand()
+	{
+		a[i] = rand() % 100 / 10; // value between 0 and 10, one decimal place
+		b[i] = rand() % 100 / 10; // value between 0 and 10
+	}
+		
 
-	// Add vectors in parallel.
 	printf("starting addition\n");
-    addWithCuda(c, a, b);
+	addWithCuda(c, a, b);
+	//printf("%f\n", c[10]);
 	printf("addition finished\n");
 
 	bool passed = verifyGPUsoln(c, a, b);
 	//if (passed) printf("passed\n");
 	//else printf("failed\n");
 
-
-    return 0;
+	free(a);
+	free(b);
+	free(c);
+	
+	
+	return 0;
 }
 
 // Helper function for using CUDA to add vectors in parallel.
 void addWithCuda(float *c, const float *a, const float *b)
 {
-    float *dev_a = 0;
-    float *dev_b = 0;
-    float *dev_c = 0;
+	float *dev_a = 0;
+	float *dev_b = 0;
+	float *dev_c = 0;
 
 	cudaError_t malloc_test;
 
-    // Allocate GPU buffers for three vectors (two input, one output)
-    malloc_test = cudaMalloc((void**)&dev_c, MATRIX_SIZE * sizeof(float));	// c
+	// Allocate GPU buffers for three vectors (two input, one output)
+	malloc_test = cudaMalloc((void**)&dev_c, MATRIX_SIZE * sizeof(float));	// c
 	if (malloc_test != cudaSuccess) printf("wtf1\t");
 
 	malloc_test = cudaMalloc((void**)&dev_a, MATRIX_SIZE * sizeof(float));	// a
@@ -100,10 +121,10 @@ void addWithCuda(float *c, const float *a, const float *b)
 	malloc_test = cudaMalloc((void**)&dev_b, MATRIX_SIZE * sizeof(float));	// b
 	if (malloc_test != cudaSuccess) printf("wtf3\t");
 
-    // Copy input vectors from host memory to GPU buffers.
-    cudaMemcpy(dev_a, a, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+	// Copy input vectors from host memory to GPU buffers.
+	cudaMemcpy(dev_a, a, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
 
-    cudaMemcpy(dev_b, b, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_b, b, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
 
 
 	// initialize event-based timer
@@ -111,33 +132,42 @@ void addWithCuda(float *c, const float *a, const float *b)
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
 	cudaEventRecord(start, 0);
-	
+
 
 	// Launch a kernel on the GPU with one thread for each element.
-	dim3 threads = dim3(16, 16);// dim3(64, 1);
-	dim3 blocks = dim3(MATRIX_SIZE / threads.x, MATRIX_SIZE / threads.y);
-	matrixAddition <<<blocks, threads, 1, 0>>>(dev_c, dev_a, dev_b);
-	
+	dim3 threads = dim3(16, 16);
+	dim3 blocks = dim3(MATRIX_DIM, MATRIX_DIM);// dim3(MATRIX_DIM / threads.x, MATRIX_DIM / threads.y);
+	matrixAddition <<<blocks, threads>>>(dev_c, dev_a, dev_b);
+
+	cudaError_t cErr = cudaGetLastError();
+	if (cErr != cudaSuccess) printf("wtf\t");
+
 	// addition finished, record time it took
 	cudaEventRecord(stop, 0);
 	cudaEventSynchronize(stop);
 	float gpu_time = 0;
 	cudaEventElapsedTime(&gpu_time, start, stop);
 	printf("time spent (ms): %.2f\n", gpu_time);
-	
+
 	//TODO
 	// kernel with one thread per row
 
 	// kernel with one thread per col
 
-    
+
 	cudaError_t syncErr = cudaDeviceSynchronize();
 	if (syncErr != cudaSuccess) printf("wtf\t");
 
-    // Copy output vector from GPU buffer to host memory.
+	// Copy output vector from GPU buffer to host memory.
+	//printf("%f\n", dev_c[10]);
 	cudaError_t cpyErr = cudaMemcpy(c, dev_c, MATRIX_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-	if (cpyErr != cudaSuccess) printf("wtf\t");
 	
+	/*for (int i = 0; i < MATRIX_SIZE; i++)
+	{
+		if (c[i] == 0) printf("%f, %f, %f\n", a[i], b[i], c[i]);
+	}*/
+	if (cpyErr != cudaSuccess) printf("wtf\t");
+
 	if (false)
 	{
 		printf("testing printing of c");
