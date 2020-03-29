@@ -3,7 +3,7 @@
 
 #include <stdio.h>
 
-#define MATRIX_DIM 500
+#define MATRIX_DIM 255
 #define MATRIX_SIZE (MATRIX_DIM * MATRIX_DIM)
 
 void addWithCuda(float *c, const float *a, const float *b);
@@ -15,7 +15,7 @@ __global__ void matrixAddition(float *C, float *A, float *B)
 	int row = blockIdx.y*blockDim.y + threadIdx.y;
 	int col = blockIdx.x*blockDim.x + threadIdx.x;
 
-	if (row < MATRIX_DIM && col < MATRIX_DIM)
+	if (row < MATRIX_DIM && col < MATRIX_DIM && row*MATRIX_DIM + col < MATRIX_SIZE)
 	{
 		float c_val = 0;
 		int ind = row*MATRIX_DIM + col;
@@ -23,6 +23,7 @@ __global__ void matrixAddition(float *C, float *A, float *B)
 		C[ind] = A[ind] + B[ind];
 		//printf("%f, %f, %f\n", A[ind], B[ind], C[ind]);
 	}
+	__syncthreads();
 }
 
 bool verifyGPUsoln(const float *GPU_C, const float *A, const float *B)
@@ -137,9 +138,12 @@ void addWithCuda(float *c, const float *a, const float *b)
 	cudaError_t cpyErr = cudaMemcpy(c, dev_c, MATRIX_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
 	if (cpyErr != cudaSuccess) printf("wtf\t");
 	
-	printf("testing printing of c");
-	for (int i = 0; i < MATRIX_SIZE; i++)
-		printf("%d\t\t%.2f\n", i, c[i]);
+	if (false)
+	{
+		printf("testing printing of c");
+		for (int i = 0; i < MATRIX_SIZE; i++)
+			printf("%d\t\t%.2f\n", i, c[i]);
+	}
 
 	cudaError_t freeErr;
 	freeErr = cudaFree(dev_c);
