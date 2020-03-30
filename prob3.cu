@@ -8,17 +8,11 @@
 #define MATRIX_SIZE (MATRIX_DIM * MATRIX_DIM)
 #define BLOCK_WIDTH 16
 
-// for selecting addition method. Selecting multiple at a time is fine,
-#define ADD_BY_ELEMENT	true
-#define ADD_BY_ROW		true
-#define ADD_BY_COL		true
-#define ADD_BY_CPU		true
-
-void addWithCuda(float *p, const float *m, const float *n);
+void mulWithCuda(float *p, const float *m, const float *n);
 void testTransferTime(float *m, float *n);
 
 // calculate one element with one thread
-__global__ void matrixAddition(float *C, float *A, float *B)
+__global__ void matrixMultiplication(float *P, float *M, float *N)
 {
 	// calculate row, col index
 	int row = blockIdx.y*blockDim.y + threadIdx.y;
@@ -26,46 +20,11 @@ __global__ void matrixAddition(float *C, float *A, float *B)
 
 	if (row < MATRIX_DIM && col < MATRIX_DIM)
 	{
-		float c_val = 0;
-		int ind = row*MATRIX_DIM + col;
+		float p_val = 0;
 
-		C[ind] = A[ind] + B[ind];
-	}
-	__syncthreads();
-}
+		// do multiplication here
 
-// calculate one row with one thread
-__global__ void matrixAddByRow(float *C, float *A, float *B)
-{
-	// calculate col index
-	int col = blockIdx.x*blockDim.x + threadIdx.x;
-	if (col < MATRIX_DIM)
-	{
-		for (int row = 0; row < MATRIX_DIM; row++)
-		{
-			float c_val = 0;
-			int ind = row*MATRIX_DIM + col;
-
-			C[ind] = A[ind] + B[ind];
-		}
-	}
-	__syncthreads();
-}
-
-// calculate one col with one thread
-__global__ void matrixAddByCol(float *C, float *A, float *B)
-{
-	// calculate row index
-	int row = blockIdx.y*blockDim.y + threadIdx.y;
-	if (row < MATRIX_DIM)
-	{
-		for (int col = 0; col < MATRIX_DIM; col++)
-		{
-			float c_val = 0;
-			int ind = row*MATRIX_DIM + col;
-
-			C[ind] = A[ind] + B[ind];
-		}
+		P[row*MATRIX_DIM + col] = p_val; // M[ind] + N[ind];
 	}
 	__syncthreads();
 }
@@ -91,7 +50,7 @@ int main()
 {
 	float *a = (float *)malloc(MATRIX_SIZE * sizeof(float)); // yeah, there ain't enough room on the
 	float *b = (float *)malloc(MATRIX_SIZE * sizeof(float)); // stack for 3 5000x5000 matricies
-	float *c = (float *)malloc(MATRIX_SIZE * sizeof(float));
+	float *c = (float *)malloc(MATRIX_SIZE * sizeof(float)); // you can mess with VS's settings but I'd rather not.
 
 	for (int i = 0; i < MATRIX_SIZE; i++)
 	{	// value between 0 and 10, one decimal place
@@ -101,9 +60,9 @@ int main()
 
 	testTransferTime(a, b);
 
-	//addWithCuda(c, a, b);
+	//mulWithCuda(p, m, n);
 
-	//verifyGPUsoln(c, a, b);
+	//verifyGPUsoln(p, m, n);
 
 	free(a);
 	free(b);
@@ -113,27 +72,27 @@ int main()
 }
 
 // Helper function for using CUDA to add vectors in parallel.
-void addWithCuda(float *c, const float *a, const float *b)
+void mulWithCuda(float *p, const float *m, const float *n)
 {
-	float *dev_a = 0;
-	float *dev_b = 0;
-	float *dev_c = 0;
+	float *dev_m = 0;
+	float *dev_n = 0;
+	float *dev_p = 0;
 
 	cudaError_t malloc_test;
 
 	// Allocate GPU buffers for three vectors (two input, one output)
-	malloc_test = cudaMalloc((void**)&dev_c, MATRIX_SIZE * sizeof(float));	// p
-	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_c\n");
+	malloc_test = cudaMalloc((void**)&dev_p, MATRIX_SIZE * sizeof(float));	// p
+	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_p\n");
 
-	malloc_test = cudaMalloc((void**)&dev_a, MATRIX_SIZE * sizeof(float));	// m
-	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_a\n");
+	malloc_test = cudaMalloc((void**)&dev_m, MATRIX_SIZE * sizeof(float));	// m
+	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_m\n");
 
-	malloc_test = cudaMalloc((void**)&dev_b, MATRIX_SIZE * sizeof(float));	// n
-	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_b\n");
+	malloc_test = cudaMalloc((void**)&dev_n, MATRIX_SIZE * sizeof(float));	// n
+	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_n\n");
 
 	// Copy input vectors from host memory to GPU.
-	cudaMemcpy(dev_a, a, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-	cudaMemcpy(dev_b, b, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_m, m, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_n, n, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
 
 
 	// create event-based timers
@@ -143,7 +102,7 @@ void addWithCuda(float *c, const float *a, const float *b)
 	cudaEventCreate(&stop);
 
 	// generall error for checking errors during GPU processing
-	cudaError_t addErr;
+	cudaError_t mulErr;
 
 
 	// create block/thread dims with add-by-element as default
@@ -152,88 +111,36 @@ void addWithCuda(float *c, const float *a, const float *b)
 	dim3 grid(numBlocks, numBlocks);
 	dim3 block(BLOCK_WIDTH, BLOCK_WIDTH);
 
-	if (ADD_BY_ELEMENT)
-	{
-		cudaEventRecord(start, 0); // start timer
+	cudaEventRecord(start, 0); // start timer
 
-		matrixAddition << </*blocks, threads*/grid, block >> >(dev_c, dev_a, dev_b);
-		addErr = cudaGetLastError();
-		if (addErr != cudaSuccess) printf("Error during addition: %s", cudaGetErrorString(addErr));
+	matrixMultiplication <<<grid, block >>>(dev_p, dev_m, dev_n);
+	mulErr = cudaGetLastError();
+	if (mulErr != cudaSuccess) printf("Error during addition: %s", cudaGetErrorString(addErr));
 
 
-		cudaEventRecord(stop, 0);	// end timer and display results
-		cudaEventSynchronize(stop);
-		cudaEventElapsedTime(&gpu_time, start, stop);
-		printf("one thread per element (ms):\t%.2f\n", gpu_time);
-	}
-	if (ADD_BY_ROW)
-	{
-		numBlocks = MATRIX_DIM / BLOCK_WIDTH;
-		grid = dim3(numBlocks, numBlocks);
-		block = dim3(BLOCK_WIDTH / 4, BLOCK_WIDTH / 4);
+	cudaEventRecord(stop, 0);	// end timer and display results
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&gpu_time, start, stop);
 
-		cudaEventRecord(start, 0); // start timer
+	printf("time taken (ms):\t%.2f\n", gpu_time); //TODO - add output of block size to make excel easier
 
-		matrixAddByRow << <grid, block >> >(dev_c, dev_a, dev_b);
-		addErr = cudaGetLastError();
-		if (addErr != cudaSuccess) printf("Error during addition: %s", cudaGetErrorString(addErr));
-
-		cudaEventRecord(stop, 0);	// end timer and display results
-		cudaEventSynchronize(stop);
-		cudaEventElapsedTime(&gpu_time, start, stop);
-		printf("one thread per row (ms):\t%.2f\n", gpu_time);
-	}
-
-	if (ADD_BY_COL)
-	{
-		// kernel with one thread per col
-		numBlocks = MATRIX_DIM / BLOCK_WIDTH;
-		grid = dim3(numBlocks, numBlocks);
-		block = dim3(BLOCK_WIDTH / 4, BLOCK_WIDTH / 4);
-
-		cudaEventRecord(start, 0); // start timer
-
-		matrixAddByCol << <grid, block >> >(dev_c, dev_a, dev_b);
-		addErr = cudaGetLastError();
-		if (addErr != cudaSuccess) printf("Error during addition: %s", cudaGetErrorString(addErr));
-
-		cudaEventRecord(stop, 0); // end timer and display results
-		cudaEventSynchronize(stop);
-		cudaEventElapsedTime(&gpu_time, start, stop);
-		printf("one thread per col (ms):\t%.2f\n", gpu_time);
-	}
-
-	if (ADD_BY_CPU)
-	{
-		float cpu_time = 0;
-		cudaEventRecord(start, 0); // start timer
-
-								   // only care about operation time, so don't actually store results anywhere
-		for (int i = 0; i < MATRIX_SIZE; i++)
-			float temp = a[i] + b[i];
-
-		cudaEventRecord(stop, 0); // end timer and display results
-		cudaEventSynchronize(stop);
-		cudaEventElapsedTime(&cpu_time, start, stop);
-		printf("cpu time (ms):\t\t\t%.2f\n", cpu_time);
-	}
 
 	cudaDeviceSynchronize();
 
 	// Copy output vector from GPU buffer to host memory.
-	cudaError_t cpyErr = cudaMemcpy(c, dev_c, MATRIX_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaError_t cpyErr = cudaMemcpy(p, dev_p, MATRIX_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
 
-	if (cpyErr != cudaSuccess) printf("error copying dev_c to host\n");
+	if (cpyErr != cudaSuccess) printf("error copying dev_p to host\n");
 
 	cudaError_t freeErr;
-	freeErr = cudaFree(dev_c);
-	if (freeErr != cudaSuccess) printf("error freeing dev_c\n");	// p
+	freeErr = cudaFree(dev_p);
+	if (freeErr != cudaSuccess) printf("error freeing dev_p\n");	// p
 
-	freeErr = cudaFree(dev_a);
-	if (freeErr != cudaSuccess) printf("error freeing dev_a\n");	// m
+	freeErr = cudaFree(dev_m);
+	if (freeErr != cudaSuccess) printf("error freeing dev_m\n");	// m
 
-	freeErr = cudaFree(dev_b);
-	if (freeErr != cudaSuccess) printf("error freeing dev_b\n");	// n
+	freeErr = cudaFree(dev_n);
+	if (freeErr != cudaSuccess) printf("error freeing dev_n\n");	// n
 }
 
 
@@ -246,10 +153,10 @@ void testTransferTime(float *m, float *n)
 
 	// Allocate GPU buffers for two vectors
 	malloc_test = cudaMalloc((void**)&dev_m, MATRIX_SIZE * sizeof(float));	// m
-	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_a\n");
+	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_m\n");
 
 	malloc_test = cudaMalloc((void**)&dev_n, MATRIX_SIZE * sizeof(float));	// n
-	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_b\n");
+	if (malloc_test != cudaSuccess) printf("error allocating mem for dev_n\n");
 
 	// create event-based timers
 	cudaEvent_t start, stop;
@@ -259,7 +166,7 @@ void testTransferTime(float *m, float *n)
 
 	cudaEventRecord(start, 0); // start timer
 
-	// Copy from host memory to GPU.
+							   // Copy from host memory to GPU.
 	cudaMemcpy(dev_m, m, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(dev_n, n, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
 
@@ -270,7 +177,7 @@ void testTransferTime(float *m, float *n)
 
 	cudaEventRecord(start, 0); // start timer
 
-	// Copy from GPU buffer to host memory.
+							   // Copy from GPU buffer to host memory.
 	cudaMemcpy(m, dev_m, MATRIX_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
 	cudaMemcpy(n, dev_n, MATRIX_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
 
@@ -281,8 +188,8 @@ void testTransferTime(float *m, float *n)
 
 	cudaError_t freeErr;
 	freeErr = cudaFree(dev_m);
-	if (freeErr != cudaSuccess) printf("error freeing dev_c\n");	// m
+	if (freeErr != cudaSuccess) printf("error freeing dev_p\n");	// m
 
 	freeErr = cudaFree(dev_n);
-	if (freeErr != cudaSuccess) printf("error freeing dev_a\n");	// n
+	if (freeErr != cudaSuccess) printf("error freeing dev_m\n");	// n
 }
