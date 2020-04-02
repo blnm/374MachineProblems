@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MATRIX_DIM 16
+#define MATRIX_DIM 5000
 #define MATRIX_SIZE (MATRIX_DIM * MATRIX_DIM)
 #define BLOCK_WIDTH 16
 
@@ -31,25 +31,41 @@ __global__ void matrixMultiplication(float *P, float *M, float *N)
 	__syncthreads();
 }
 
-void verifyGPUsoln(const float *GPU_P, const float *M, const float *N)
+void MatrixMulCPU(float *P, const float *M, const float *N)
 {
-	bool passed = true;
-	float *P = (float *)malloc(MATRIX_SIZE * sizeof(float));
+	cudaEvent_t start, stop;
+	float cpu_time = 0;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+	cudaEventRecord(start, 0); // start timer
+
 	for (int i = 0; i < MATRIX_DIM; i++)
 	{
 		for (int j = 0; j < MATRIX_DIM; j++)
 		{
 			float p_val = 0;
-			for (int k = 0; j < MATRIX_DIM; j++)
+			for (int k = 0; k < MATRIX_DIM; k++)
 				p_val += M[i * MATRIX_DIM + k] * N[k * MATRIX_DIM + j];
 			P[i * MATRIX_DIM + j] = p_val;
 		}
-		
 	}
+	cudaEventRecord(stop, 0);	// end timer and display results
+	cudaEventSynchronize(stop);
+	cudaEventElapsedTime(&cpu_time, start, stop);
+
+	printf("CPU time (ms):\t%.2f\n", cpu_time);
+}
+
+void verifyGPUsoln(const float *GPU_P, const float *M, const float *N)
+{
+	bool passed = true;
+	float *P = (float *)malloc(MATRIX_SIZE * sizeof(float));
+	MatrixMulCPU(P, M, N);
 	for (int i = 0; i < MATRIX_SIZE; i++)
 	{
 		if (GPU_P[i] != P[i])
 		{
+			//printf("%f, %f\n", GPU_P[i], P[i]);
 			passed = false;
 			break;
 		}
@@ -68,8 +84,8 @@ int main()
 
 	for (int i = 0; i < MATRIX_SIZE; i++)
 	{	// value between 0 and 10, one decimal place
-		m[i] = rand() % 100 / 10.0;
-		n[i] = rand() % 100 / 10.0;
+		m[i] = i;// rand() % 100 / 10.0;
+		n[i] = i;// rand() % 100 / 10.0;
 	}
 
 	//testTransferTime(m, n);
@@ -136,7 +152,7 @@ void mulWithCuda(float *p, const float *m, const float *n)
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&gpu_time, start, stop);
 
-	printf("time taken (ms):\t%.2f\n", gpu_time); //TODO - add output of block size to make excel easier
+	printf("GPU time (ms):\t%.2f\n", gpu_time); //TODO - add output of block size to make excel easier
 
 
 	cudaDeviceSynchronize();
