@@ -23,6 +23,8 @@ __global__ void matrixMultiplication(float *P, float *M, float *N)
 		float p_val = 0;
 
 		// do multiplication here
+		for (int k = 0; k < MATRIX_DIM; k++)
+			p_val += M[row * width + k] * N[k * width + col];
 
 		P[row*MATRIX_DIM + col] = p_val; // M[ind] + N[ind];
 	}
