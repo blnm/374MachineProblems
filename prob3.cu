@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MATRIX_DIM 500
+#define MATRIX_DIM 16
 #define MATRIX_SIZE (MATRIX_DIM * MATRIX_DIM)
 #define BLOCK_WIDTH 16
 
@@ -24,19 +24,31 @@ __global__ void matrixMultiplication(float *P, float *M, float *N)
 
 		// do multiplication here
 		for (int k = 0; k < MATRIX_DIM; k++)
-			p_val += M[row * width + k] * N[k * width + col];
+			p_val += M[row * MATRIX_DIM + k] * N[k * MATRIX_DIM + col];
 
 		P[row*MATRIX_DIM + col] = p_val; // M[ind] + N[ind];
 	}
 	__syncthreads();
 }
 
-void verifyGPUsoln(const float *GPU_C, const float *A, const float *B)
+void verifyGPUsoln(const float *GPU_P, const float *M, const float *N)
 {
 	bool passed = true;
+	float *P = (float *)malloc(MATRIX_SIZE * sizeof(float));
+	for (int i = 0; i < MATRIX_DIM; i++)
+	{
+		for (int j = 0; j < MATRIX_DIM; j++)
+		{
+			float p_val = 0;
+			for (int k = 0; j < MATRIX_DIM; j++)
+				p_val += M[i * MATRIX_DIM + k] * N[k * MATRIX_DIM + j];
+			P[i * MATRIX_DIM + j] = p_val;
+		}
+		
+	}
 	for (int i = 0; i < MATRIX_SIZE; i++)
 	{
-		if (GPU_C[i] != A[i] + B[i])
+		if (GPU_P[i] != P[i])
 		{
 			passed = false;
 			break;
@@ -50,25 +62,25 @@ void verifyGPUsoln(const float *GPU_C, const float *A, const float *B)
 
 int main()
 {
-	float *a = (float *)malloc(MATRIX_SIZE * sizeof(float)); // yeah, there ain't enough room on the
-	float *b = (float *)malloc(MATRIX_SIZE * sizeof(float)); // stack for 3 5000x5000 matricies
-	float *c = (float *)malloc(MATRIX_SIZE * sizeof(float)); // you can mess with VS's settings but I'd rather not.
+	float *m = (float *)malloc(MATRIX_SIZE * sizeof(float)); // yeah, there ain't enough room on the
+	float *n = (float *)malloc(MATRIX_SIZE * sizeof(float)); // stack for 3 5000x5000 matricies
+	float *p = (float *)malloc(MATRIX_SIZE * sizeof(float)); // you can mess with VS's settings but I'd rather not.
 
 	for (int i = 0; i < MATRIX_SIZE; i++)
 	{	// value between 0 and 10, one decimal place
-		a[i] = rand() % 100 / 10.0;
-		b[i] = rand() % 100 / 10.0;
+		m[i] = rand() % 100 / 10.0;
+		n[i] = rand() % 100 / 10.0;
 	}
 
-	testTransferTime(a, b);
+	//testTransferTime(m, n);
 
-	//mulWithCuda(p, m, n);
+	mulWithCuda(p, m, n);
 
-	//verifyGPUsoln(p, m, n);
+	verifyGPUsoln(p, m, n);
 
-	free(a);
-	free(b);
-	free(c);
+	free(m);
+	free(n);
+	free(p);
 
 	return 0;
 }
@@ -115,9 +127,9 @@ void mulWithCuda(float *p, const float *m, const float *n)
 
 	cudaEventRecord(start, 0); // start timer
 
-	matrixMultiplication <<<grid, block >>>(dev_p, dev_m, dev_n);
+	matrixMultiplication <<<grid, block>>>(dev_p, dev_m, dev_n);
 	mulErr = cudaGetLastError();
-	if (mulErr != cudaSuccess) printf("Error during addition: %s", cudaGetErrorString(addErr));
+	if (mulErr != cudaSuccess) printf("Error during addition: %s", cudaGetErrorString(mulErr));
 
 
 	cudaEventRecord(stop, 0);	// end timer and display results
@@ -168,7 +180,7 @@ void testTransferTime(float *m, float *n)
 
 	cudaEventRecord(start, 0); // start timer
 
-							   // Copy from host memory to GPU.
+	// Copy from host memory to GPU.
 	cudaMemcpy(dev_m, m, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(dev_n, n, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
 
