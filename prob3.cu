@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MATRIX_DIM 5000
+#define MATRIX_DIM 1250
 #define MATRIX_SIZE (MATRIX_DIM * MATRIX_DIM)
 #define BLOCK_WIDTH 16
 
@@ -84,8 +84,8 @@ int main()
 
 	for (int i = 0; i < MATRIX_SIZE; i++)
 	{	// value between 0 and 10, one decimal place
-		m[i] = i;// rand() % 100 / 10.0;
-		n[i] = i;// rand() % 100 / 10.0;
+		m[i] = rand() % 100 / 10.0;
+		n[i] = rand() % 100 / 10.0;
 	}
 
 	//testTransferTime(m, n);
