@@ -7,14 +7,13 @@
 #define BLOCK_WIDTH 16
 #define TILE_WIDTH 4
 void mulWithCuda(float *p, const float *m, const float *n);
-void testTransferTime(float *m, float *n);
 // calculate one element with one thread
 __global__ void matrixMultiplication(float *P, float *M, float *N)
 {
     __shared__ float Mds[TILE_WIDTH][TILE_WIDTH];
     __shared__ float Nds[TILE_WIDTH][TILE_WIDTH];
     int bx = blockIdx.x;    int by = blockIdx.y;
-    int tx = threadIdx.x;   int ty = threadIdx.y;
+    int tx = threadIdx.x;    int ty = threadIdx.y;
     int row = by * TILE_WIDTH + ty;
     int col = bx * TILE_WIDTH + tx;
     float p_val = 0;
@@ -62,7 +61,6 @@ void verifyGPUsoln(const float *GPU_P, const float *M, const float *N)
     {
         if (GPU_P[i] != P[i])
         {
-            //printf("%f, %f\n", GPU_P[i], P[i]);
             passed = false;
             break;
         }
@@ -81,7 +79,6 @@ int main()
         m[i] = rand() % 100 / 10.0;
         n[i] = rand() % 100 / 10.0;
     }
-    //testTransferTime(m, n);
     mulWithCuda(p, m, n);
     verifyGPUsoln(p, m, n);
     free(m);
@@ -112,15 +109,9 @@ void mulWithCuda(float *p, const float *m, const float *n)
     float gpu_time = 0;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    // generall error for checking errors during GPU processing
+    // general error for checking errors during GPU processing
     cudaError_t mulErr;
 　
-    // create block/thread dims with add-by-element as default
-    /*int numBlocks = MATRIX_DIM / BLOCK_WIDTH;
-    if (MATRIX_DIM % BLOCK_WIDTH) numBlocks++;
-    dim3 grid(numBlocks, numBlocks);
-    dim3 block(BLOCK_WIDTH, BLOCK_WIDTH);
-    */
     int numBlocks = MATRIX_DIM / TILE_WIDTH;
     if (MATRIX_DIM % TILE_WIDTH) numBlocks++;
     dim3 grid(numBlocks, numBlocks);
@@ -128,13 +119,11 @@ void mulWithCuda(float *p, const float *m, const float *n)
     cudaEventRecord(start, 0); // start timer
     matrixMultiplication << <grid, block >> >(dev_p, dev_m, dev_n);
     mulErr = cudaGetLastError();
-    if (mulErr != cudaSuccess) printf("Error during addition: %s", cudaGetErrorString(mulErr));
-　
+    if (mulErr != cudaSuccess) printf("Error during multiplication: %s", cudaGetErrorString(mulErr));
     cudaEventRecord(stop, 0);    // end timer and display results
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&gpu_time, start, stop);
     printf("GPU time (ms):\t%.2f\n", gpu_time); //TODO - add output of block size to make excel easier
-　
     cudaDeviceSynchronize();
     // Copy output vector from GPU buffer to host memory.
     cudaError_t cpyErr = cudaMemcpy(p, dev_p, MATRIX_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
@@ -146,43 +135,5 @@ void mulWithCuda(float *p, const float *m, const float *n)
     if (freeErr != cudaSuccess) printf("error freeing dev_m\n");    // m
     freeErr = cudaFree(dev_n);
     if (freeErr != cudaSuccess) printf("error freeing dev_n\n");    // n
-}
-　
-void testTransferTime(float *m, float *n)
-{
-    float *dev_m = 0;
-    float *dev_n = 0;
-    cudaError_t malloc_test;
-    // Allocate GPU buffers for two vectors
-    malloc_test = cudaMalloc((void**)&dev_m, MATRIX_SIZE * sizeof(float));    // m
-    if (malloc_test != cudaSuccess) printf("error allocating mem for dev_m\n");
-    malloc_test = cudaMalloc((void**)&dev_n, MATRIX_SIZE * sizeof(float));    // n
-    if (malloc_test != cudaSuccess) printf("error allocating mem for dev_n\n");
-    // create event-based timers
-    cudaEvent_t start, stop;
-    float gpu_time = 0;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start, 0); // start timer
-                             // Copy from host memory to GPU.
-    cudaMemcpy(dev_m, m, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_n, n, MATRIX_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-    cudaEventRecord(stop, 0);    // end timer and display results
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&gpu_time, start, stop);
-    printf("copy host to device (ms):\t%.2f\n", gpu_time);
-    cudaEventRecord(start, 0); // start timer
-                             // Copy from GPU buffer to host memory.
-    cudaMemcpy(m, dev_m, MATRIX_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaMemcpy(n, dev_n, MATRIX_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaEventRecord(stop, 0);    // end timer and display results
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&gpu_time, start, stop);
-    printf("copy device to host (ms):\t%.2f\n", gpu_time);
-    cudaError_t freeErr;
-    freeErr = cudaFree(dev_m);
-    if (freeErr != cudaSuccess) printf("error freeing dev_p\n");    // m
-    freeErr = cudaFree(dev_n);
-    if (freeErr != cudaSuccess) printf("error freeing dev_m\n");    // n
 }
 
